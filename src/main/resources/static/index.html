@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Error Free Text</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f4f4f4;
+            margin: 0;
+            padding: 40px 16px;
+        }
+
+        .container {
+            max-width: 700px;
+            margin: 0 auto;
+            background: #fff;
+            padding: 24px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            margin-top: 0;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 6px;
+            font-weight: bold;
+        }
+
+        textarea {
+            width: 100%;
+            height: 140px;
+            padding: 8px;
+            box-sizing: border-box;
+            resize: vertical;
+            font-size: 15px;
+        }
+
+        select, button {
+            padding: 8px 12px;
+            font-size: 15px;
+        }
+
+        .row {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            margin: 16px 0;
+        }
+
+        button {
+            background: #2d6cdf;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            background: #9db8e8;
+            cursor: default;
+        }
+
+        #result {
+            display: none;
+            margin-top: 16px;
+            padding: 14px;
+            border-radius: 6px;
+            white-space: pre-wrap;
+        }
+
+        .pending {
+            background: #fff8e1;
+        }
+
+        .ok {
+            background: #e8f5e9;
+        }
+
+        .error {
+            background: #ffebee;
+            color: #b71c1c;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Error Free Text</h1>
+    <p>Введите текст с опечатками — сервис исправит их через Яндекс.Спеллер.</p>
+
+    <label for="text">Текст</label>
+    <textarea id="text" placeholder="Превет, как дила?"></textarea>
+
+    <div class="row">
+        <label for="language" style="margin: 0">Язык:</label>
+        <select id="language">
+            <option value="RU">RU</option>
+            <option value="EN">EN</option>
+        </select>
+        <button id="submit">Исправить</button>
+    </div>
+
+    <div id="result"></div>
+</div>
+
+<script>
+    var POLL_INTERVAL_MS = 2000;
+    var MAX_ATTEMPTS = 30;
+
+    var textInput = document.getElementById('text');
+    var languageSelect = document.getElementById('language');
+    var submitButton = document.getElementById('submit');
+    var resultBox = document.getElementById('result');
+
+    submitButton.addEventListener('click', submitTask);
+
+    function submitTask() {
+        var text = textInput.value.trim();
+        if (text === '') {
+            showResult('Введите текст', 'error');
+            return;
+        }
+
+        submitButton.disabled = true;
+        showResult('Отправляем задачу...', 'pending');
+
+        fetch('/tasks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: text, language: languageSelect.value })
+        }).then(function (response) {
+            return response.json().then(function (data) {
+                if (!response.ok) {
+                    showResult(data.errorMessage || 'Ошибка при создании задачи', 'error');
+                    submitButton.disabled = false;
+                    return;
+                }
+                showResult('Задача создана, ждём результат...', 'pending');
+                waitForResult(data.id, 0);
+            });
+        }).catch(function () {
+            showResult('Не удалось связаться с сервером', 'error');
+            submitButton.disabled = false;
+        });
+    }
+
+    function waitForResult(id, attempt) {
+        if (attempt >= MAX_ATTEMPTS) {
+            showResult('Превышено время ожидания, попробуйте ещё раз', 'error');
+            submitButton.disabled = false;
+            return;
+        }
+
+        setTimeout(function () {
+            fetch('/tasks/' + id).then(function (response) {
+                return response.json();
+            }).then(function (data) {
+                if (data.status === 'COMPLETED') {
+                    showResult('Готово:\n\n' + data.correctedText, 'ok');
+                    submitButton.disabled = false;
+                } else if (data.status === 'ERROR') {
+                    showResult('Не удалось исправить текст:\n\n' + data.errorMessage, 'error');
+                    submitButton.disabled = false;
+                } else {
+                    showResult('Статус: ' + data.status + ' ...', 'pending');
+                    waitForResult(id, attempt + 1);
+                }
+            }).catch(function () {
+                showResult('Не удалось получить результат', 'error');
+                submitButton.disabled = false;
+            });
+        }, POLL_INTERVAL_MS);
+    }
+
+    function showResult(message, cssClass) {
+        resultBox.textContent = message;
+        resultBox.className = cssClass;
+        resultBox.style.display = 'block';
+    }
+</script>
+</body>
+</html>
